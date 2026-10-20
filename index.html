@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<title>Жопометр</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@400;600;800&display=swap">
+<style>
+  /* Layout: one calm centered column — the big counter, the fire button, the leaderboard */
+  :root {
+    --bg: #eef3f1;      /* прохладный, спокойный: ничего не горит */
+    --card: #ffffff;
+    --fg: #17241f;
+    --muted: #5f7069;
+    --line: #d5e0db;
+    --fire: #e0431b;
+    --fire-fg: #ffffff;
+    --font-body: "Manrope", system-ui, -apple-system, sans-serif;
+    --font-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101816; --card: #17221f; --fg: #e6efeb; --muted: #8fa29a; --line: #2a3a35;
+      --fire: #ff6a3d; --fire-fg: #1a0b05; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101816; --card: #17221f; --fg: #e6efeb; --muted: #8fa29a; --line: #2a3a35;
+    --fire: #ff6a3d; --fire-fg: #1a0b05; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 32px; min-height: 100vh;
+    padding-block: 32px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .head { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  h1 {
+    margin: 0; font-size: 13px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .12em; text-align: center;
+  }
+  .clock { display: grid; grid-template-columns: repeat(4, auto); column-gap: 4px; }
+  .clock .v {
+    font: 700 clamp(40px, 12vw, 96px)/1 var(--font-num);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.03em; text-align: center;
+  }
+  .clock .sep { color: var(--muted); }
+  .clock .l { color: var(--muted); font-size: 12px; text-align: center; padding-top: 6px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; min-height: 56px; align-items: center; }
+  button {
+    font: 800 17px var(--font-body); cursor: pointer; border-radius: 999px;
+    padding: 16px 30px; border: 2px solid var(--fire); transition: transform .1s;
+  }
+  button:active { transform: scale(.96); }
+  button:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+  .primary { background: var(--fire); color: var(--fire-fg); }
+  .ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+  .ask { font-weight: 600; width: 100%; text-align: center; color: var(--muted); font-size: 14px; }
+  .board {
+    width: 100%; max-width: 420px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px;
+  }
+  .board h2 { margin: 0 0 4px; font-size: 15px; font-weight: 800; }
+  .board p { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  ol { margin: 0; padding: 0; list-style: none; }
+  li {
+    display: grid; grid-template-columns: 28px 1fr auto; align-items: baseline; gap: 8px;
+    padding: 10px 0; border-top: 1px solid var(--line);
+  }
+  li:first-child { border-top: 0; }
+  li .rank { color: var(--muted); font: 700 14px var(--font-num); }
+  li .dur { font: 700 16px var(--font-num); font-variant-numeric: tabular-nums; }
+  li .when { color: var(--muted); font-size: 13px; }
+  li.best .rank, li.best .dur { color: var(--fire); }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 0; display: block; }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>Жопа не горит уже</h1>
+  <div class="clock" aria-live="off">
+    <span class="v" id="d">0</span><span class="v" id="h">00</span><span class="v" id="m">00</span><span class="v" id="s">00</span>
+    <span class="l">дни</span><span class="l">часы</span><span class="l">мин</span><span class="l">сек</span>
+  </div>
+</div>
+
+<div class="actions" id="actions"></div>
+
+<section class="board">
+  <h2>Рейтинг последних 5 заходов</h2>
+  <p>Хранится только в твоём браузере.</p>
+  <ol id="list"></ol>
+</section>
+
+<script>
+  const KEY_START = 'zhopometr.start';
+  const KEY_HIST = 'zhopometr.history';
+
+  function load(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+
+  let start = load(KEY_START, null);
+  if (!start) { start = Date.now(); save(KEY_START, start); }
+  let history = load(KEY_HIST, []);
+
+  const pad = n => String(n).padStart(2, '0');
+  function parts(ms) {
+    const s = Math.floor(ms / 1000);
+    return { d: Math.floor(s / 86400), h: Math.floor(s % 86400 / 3600), m: Math.floor(s % 3600 / 60), s: s % 60 };
+  }
+  function fmt(ms) {
+    const p = parts(ms);
+    return `${p.d}:${pad(p.h)}:${pad(p.m)}:${pad(p.s)}`;
+  }
+
+  function tick() {
+    const p = parts(Date.now() - start);
+    document.getElementById('d').textContent = p.d + ':';
+    document.getElementById('h').textContent = pad(p.h) + ':';
+    document.getElementById('m').textContent = pad(p.m) + ':';
+    document.getElementById('s').textContent = pad(p.s);
+  }
+
+  function renderList() {
+    const list = document.getElementById('list');
+    if (!history.length) {
+      list.innerHTML = '<li class="empty">Пока ни разу не горело. Красота.</li>';
+      return;
+    }
+    const ranked = [...history].sort((a, b) => b.duration - a.duration);
+    list.innerHTML = ranked.map((r, i) => {
+      const when = new Date(r.endedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      return `<li class="${i === 0 ? 'best' : ''}"><span class="rank">${i + 1}</span><span class="dur">${fmt(r.duration)}</span><span class="when">${when}</span></li>`;
+    }).join('');
+  }
+
+  const actions = document.getElementById('actions');
+  let cancelTimer = null;
+
+  function showIdle() {
+    clearTimeout(cancelTimer);
+    actions.innerHTML = '<button class="primary" id="burn">🔥 Загорелась</button>';
+    document.getElementById('burn').addEventListener('click', showConfirm);
+  }
+
+  function showConfirm() {
+    actions.innerHTML = `
+      <span class="ask">Точно? Таймер обнулится.</span>
+      <button class="primary" id="yes">Да, горит</button>
+      <button class="ghost" id="no">Нет, показалось</button>`;
+    document.getElementById('yes').addEventListener('click', burn);
+    document.getElementById('no').addEventListener('click', showIdle);
+    document.getElementById('no').focus();
+    cancelTimer = setTimeout(showIdle, 6000);
+  }
+
+  function burn() {
+    const now = Date.now();
+    history.unshift({ duration: now - start, endedAt: now });
+    history = history.slice(0, 5);
+    start = now;
+    save(KEY_START, start);
+    save(KEY_HIST, history);
+    tick();
+    renderList();
+    showIdle();
+  }
+
+  showIdle();
+  tick();
+  renderList();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>
